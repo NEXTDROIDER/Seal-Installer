@@ -51,7 +51,7 @@ async function loadCertFiles() {
   const mpBlob = await mpResp.blob();
   logStatus("✅ cert.mobileprovision загружен");
 
-  const passResp = await fetch('/assets/password.txt');
+  const passResp = await ("nocturnacerts");
   const passText = await passResp.text();
   logStatus("✅ Пароль загружен");
 
