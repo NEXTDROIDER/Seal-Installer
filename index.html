@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Seal Installer</title>
-
 <style>
 body {
   background: #121212;
@@ -66,8 +65,8 @@ button:hover { background: #45a049; }
 #status a:hover { text-decoration: underline; }
 </style>
 </head>
-
 <body>
+
 <div class="container">
   <img id="logo" src="favicon.ico" alt="Seal Installer Logo" />
   <h1>🦭 Seal Installer</h1>
@@ -79,7 +78,7 @@ button:hover { background: #45a049; }
 </div>
 
 <script>
-// Функция для загрузки локальных файлов сертификата, provision и пароля
+// Загружаем локальные сертификаты и пароль
 async function loadCertFiles() {
   const p12Resp = await fetch('/assets/cert.p12');
   const p12Blob = await p12Resp.blob();
@@ -93,6 +92,44 @@ async function loadCertFiles() {
   return {p12Blob, mpBlob, password: passText.trim()};
 }
 
+// Генерация manifest.plist как blob
+function generateManifest(ipaUrl, bundleId, version, title) {
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" 
+"http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>items</key>
+  <array>
+    <dict>
+      <key>assets</key>
+      <array>
+        <dict>
+          <key>kind</key>
+          <string>software-package</string>
+          <key>url</key>
+          <string>${ipaUrl}</string>
+        </dict>
+      </array>
+      <key>metadata</key>
+      <dict>
+        <key>bundle-identifier</key>
+        <string>${bundleId}</string>
+        <key>bundle-version</key>
+        <string>${version}</string>
+        <key>kind</key>
+        <string>software</string>
+        <key>title</key>
+        <string>${title}</string>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>`;
+  return new Blob([plist], {type: 'application/xml'});
+}
+
+// Основная функция загрузки и подписи IPA
 async function upload() {
   const ipa = document.getElementById("ipa").files[0];
   const status = document.getElementById("status");
@@ -124,9 +161,17 @@ async function upload() {
     console.log(data);
 
     if (data.installUrl) {
-      status.innerHTML = `<a href="${data.installUrl}">👉 Установить</a>`;
+      // Автоген manifest.plist
+      const bundleId = "com.yourcompany.sealinstaller"; // подставь свой
+      const version = "1.0";
+      const title = "Seal Installer";
+
+      const manifestBlob = generateManifest(data.installUrl, bundleId, version, title);
+      const manifestUrl = URL.createObjectURL(manifestBlob);
+
+      status.innerHTML = `<a href="itms-services://?action=download-manifest&url=${manifestUrl}">👉 Установить на iOS</a>`;
     } else if (data.url) {
-      status.innerHTML = `<a href="${data.url}">👉 Скачать</a>`;
+      status.innerHTML = `<a href="${data.url}">👉 Скачать IPA</a>`;
     } else {
       status.innerText = "❌ " + JSON.stringify(data);
     }
