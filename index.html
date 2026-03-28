@@ -4,65 +4,16 @@
 <meta charset="UTF-8">
 <title>Seal Installer</title>
 <style>
-body {
-  background: #121212;
-  color: #ffffff;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  text-align: center;
-  padding: 50px 20px;
-  margin: 0;
-}
-.container {
-  background: #1e1e1e;
-  padding: 40px;
-  border-radius: 20px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.7);
-  display: inline-block;
-}
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-#logo {
-  width: 120px;
-  height: 120px;
-  border-radius: 30px;
-  margin-bottom: 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
-  animation: blink 5s linear 1;
-}
-h1 {
-  font-size: 42px;
-  margin-bottom: 30px;
-  color: #4CAF50;
-  text-shadow: 0 0 10px #4CAF50;
-}
-input {
-  padding: 12px;
-  margin: 10px 0;
-  border-radius: 12px;
-  border: none;
-  background: #1f1f1f;
-  color: #fff;
-  font-size: 16px;
-}
-button {
-  background: #4CAF50;
-  color: white;
-  padding: 14px 28px;
-  font-size: 18px;
-  border: none;
-  border-radius: 14px;
-  cursor: pointer;
-}
-button:hover { background: #45a049; }
-#status a {
-  color: #4CAF50;
-  font-size: 18px;
-  text-decoration: none;
-  font-weight: bold;
-}
-#status a:hover { text-decoration: underline; }
+body { background:#121212; color:#fff; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; text-align:center; padding:50px 20px; margin:0; }
+.container { background:#1e1e1e; padding:40px; border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,0.7); display:inline-block; }
+@keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0;} }
+#logo { width:120px; height:120px; border-radius:30px; margin-bottom:20px; box-shadow:0 4px 20px rgba(0,0,0,0.6); animation:blink 5s linear 1; }
+h1 { font-size:42px; margin-bottom:30px; color:#4CAF50; text-shadow:0 0 10px #4CAF50; }
+input { padding:12px; margin:10px 0; border-radius:12px; border:none; background:#1f1f1f; color:#fff; font-size:16px; }
+button { background:#4CAF50; color:white; padding:14px 28px; font-size:18px; border:none; border-radius:14px; cursor:pointer; }
+button:hover { background:#45a049; }
+#status a { color:#4CAF50; font-size:18px; text-decoration:none; font-weight:bold; }
+#status a:hover { text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -77,22 +28,22 @@ button:hover { background: #45a049; }
   <p id="status"></p>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.11.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bplist-parser@0.1.3/dist/bplist-parser.min.js"></script>
+
 <script>
-// Загружаем локальные сертификаты и пароль
+// Загрузка сертификатов и пароля
 async function loadCertFiles() {
   const p12Resp = await fetch('/assets/cert.p12');
   const p12Blob = await p12Resp.blob();
-
   const mpResp = await fetch('/assets/cert.mobileprovision');
   const mpBlob = await mpResp.blob();
-
   const passResp = await fetch('/assets/password.txt');
   const passText = await passResp.text();
-
   return {p12Blob, mpBlob, password: passText.trim()};
 }
 
-// Генерация manifest.plist как blob
+// Генерация manifest.plist
 function generateManifest(ipaUrl, bundleId, version, title) {
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" 
@@ -126,46 +77,55 @@ function generateManifest(ipaUrl, bundleId, version, title) {
   </array>
 </dict>
 </plist>`;
-  return new Blob([plist], {type: 'application/xml'});
+  return new Blob([plist], {type:'application/xml'});
 }
 
-// Основная функция загрузки и подписи IPA
+// Извлекаем bundle-id и версию из IPA
+async function extractInfoFromIPA(file) {
+  const zip = await JSZip.loadAsync(file);
+  let infoPlistFile = null;
+
+  // Находим Info.plist внутри Payload/*.app/
+  zip.folder("Payload").forEach((relativePath, fileEntry) => {
+    if (relativePath.endsWith("Info.plist")) infoPlistFile = fileEntry;
+  });
+
+  if (!infoPlistFile) throw new Error("Info.plist не найден в IPA");
+
+  const plistArrayBuffer = await infoPlistFile.async("arraybuffer");
+  const plistData = bplistParser.parseBuffer(Buffer.from(plistArrayBuffer));
+
+  const info = plistData[0];
+  return {bundleId: info.CFBundleIdentifier, version: info.CFBundleShortVersionString};
+}
+
+// Основная функция загрузки и подписи
 async function upload() {
-  const ipa = document.getElementById("ipa").files[0];
+  const ipaFile = document.getElementById("ipa").files[0];
   const status = document.getElementById("status");
+  if (!ipaFile) { status.innerText="❌ Выбери IPA"; return; }
 
-  if (!ipa) {
-    status.innerText = "❌ Выбери IPA";
-    return;
-  }
-
-  status.innerText = "⏳ Загружаем сертификат...";
-
+  status.innerText="⏳ Загружаем сертификат...";
   try {
     const {p12Blob, mpBlob, password} = await loadCertFiles();
 
     const form = new FormData();
-    form.append("ipa", ipa);
+    form.append("ipa", ipaFile);
     form.append("p12", p12Blob, "cert.p12");
     form.append("mobileprovision", mpBlob, "cert.mobileprovision");
     form.append("password", password);
 
-    status.innerText = "⏳ Подписываем...";
-
-    const res = await fetch("https://api.daisign.lol/sign", {
-      method: "POST",
-      body: form
-    });
-
+    status.innerText="⏳ Подписываем...";
+    const res = await fetch("https://api.daisign.lol/sign", {method:"POST", body:form});
     const data = await res.json();
     console.log(data);
 
     if (data.installUrl) {
-      // Автоген manifest.plist
-      const bundleId = "com.yourcompany.sealinstaller"; // подставь свой
-      const version = "1.0";
+      // Получаем bundle-id и версию из IPA
+      const {bundleId, version} = await extractInfoFromIPA(ipaFile);
       const title = "Seal Installer";
 
+      // Автоген manifest.plist
       const manifestBlob = generateManifest(data.installUrl, bundleId, version, title);
       const manifestUrl = URL.createObjectURL(manifestBlob);
 
@@ -177,11 +137,10 @@ async function upload() {
     }
 
   } catch(e) {
-    status.innerText = "❌ Ошибка сети или загрузки файлов";
+    status.innerText="❌ Ошибка сети или файлов";
     console.error(e);
   }
 }
 </script>
-
 </body>
 </html>
