@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Seal Installer</title>
+<title>Seal Installer - Debug</title>
 <style>
 body { background:#121212; color:#fff; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; text-align:center; padding:50px 20px; margin:0; }
 .container { background:#1e1e1e; padding:40px; border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,0.7); display:inline-block; }
@@ -12,6 +12,7 @@ h1 { font-size:42px; margin-bottom:30px; color:#4CAF50; text-shadow:0 0 10px #4C
 input { padding:12px; margin:10px 0; border-radius:12px; border:none; background:#1f1f1f; color:#fff; font-size:16px; }
 button { background:#4CAF50; color:white; padding:14px 28px; font-size:18px; border:none; border-radius:14px; cursor:pointer; }
 button:hover { background:#45a049; }
+#status { margin-top:20px; text-align:left; max-width:600px; word-break:break-word; }
 #status a { color:#4CAF50; font-size:18px; text-decoration:none; font-weight:bold; }
 #status a:hover { text-decoration:underline; }
 </style>
@@ -20,31 +21,46 @@ button:hover { background:#45a049; }
 
 <div class="container">
   <img id="logo" src="favicon.ico" alt="Seal Installer Logo" />
-  <h1>🦭 Seal Installer</h1>
+  <h1>🦭 Seal Installer Debug</h1>
 
   <input type="file" id="ipa" accept=".ipa"><br>
   <button onclick="upload()">Подписать и установить</button>
 
-  <p id="status"></p>
+  <pre id="status"></pre>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.11.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bplist-parser@0.1.3/dist/bplist-parser.min.js"></script>
 
 <script>
+// Вывод в статус и консоль
+function logStatus(msg) {
+  const status = document.getElementById("status");
+  status.innerText += msg + "\n";
+  console.log(msg);
+}
+
 // Загрузка сертификатов и пароля
 async function loadCertFiles() {
+  logStatus("📂 Загружаем сертификаты...");
   const p12Resp = await fetch('/assets/cert.p12');
   const p12Blob = await p12Resp.blob();
+  logStatus("✅ cert.p12 загружен");
+
   const mpResp = await fetch('/assets/cert.mobileprovision');
   const mpBlob = await mpResp.blob();
+  logStatus("✅ cert.mobileprovision загружен");
+
   const passResp = await fetch('/assets/password.txt');
   const passText = await passResp.text();
+  logStatus("✅ Пароль загружен");
+
   return {p12Blob, mpBlob, password: passText.trim()};
 }
 
 // Генерация manifest.plist
 function generateManifest(ipaUrl, bundleId, version, title) {
+  logStatus("📄 Генерируем manifest.plist...");
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" 
 "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,64 +96,71 @@ function generateManifest(ipaUrl, bundleId, version, title) {
   return new Blob([plist], {type:'application/xml'});
 }
 
-// Извлекаем bundle-id и версию из IPA
+// Извлечение bundle-id и версии из IPA
 async function extractInfoFromIPA(file) {
+  logStatus("🔍 Распаковываем IPA...");
   const zip = await JSZip.loadAsync(file);
-  let infoPlistFile = null;
+  logStatus("✅ IPA загружен как ZIP");
 
-  // Находим Info.plist внутри Payload/*.app/
+  let infoPlistFile = null;
   zip.folder("Payload").forEach((relativePath, fileEntry) => {
-    if (relativePath.endsWith("Info.plist")) infoPlistFile = fileEntry;
+    logStatus("📄 Проверяем файл: " + relativePath);
+    if (relativePath.endsWith("Info.plist")) {
+      infoPlistFile = fileEntry;
+      logStatus("✅ Найден Info.plist: " + relativePath);
+    }
   });
 
-  if (!infoPlistFile) throw new Error("Info.plist не найден в IPA");
+  if (!infoPlistFile) throw new Error("❌ Info.plist не найден в IPA");
 
+  logStatus("📦 Читаем Info.plist...");
   const plistArrayBuffer = await infoPlistFile.async("arraybuffer");
   const plistData = bplistParser.parseBuffer(Buffer.from(plistArrayBuffer));
+  logStatus("✅ Info.plist распарсен");
 
   const info = plistData[0];
+  logStatus(`ℹ️ Bundle ID: ${info.CFBundleIdentifier}, Version: ${info.CFBundleShortVersionString}`);
   return {bundleId: info.CFBundleIdentifier, version: info.CFBundleShortVersionString};
 }
 
-// Основная функция загрузки и подписи
+// Основная функция
 async function upload() {
+  document.getElementById("status").innerText = ""; // Очистка статуса
   const ipaFile = document.getElementById("ipa").files[0];
-  const status = document.getElementById("status");
-  if (!ipaFile) { status.innerText="❌ Выбери IPA"; return; }
+  if (!ipaFile) { logStatus("❌ IPA не выбран"); return; }
 
-  status.innerText="⏳ Загружаем сертификат...";
   try {
     const {p12Blob, mpBlob, password} = await loadCertFiles();
 
+    logStatus("🚀 Отправляем IPA на подпись...");
     const form = new FormData();
     form.append("ipa", ipaFile);
     form.append("p12", p12Blob, "cert.p12");
     form.append("mobileprovision", mpBlob, "cert.mobileprovision");
     form.append("password", password);
 
-    status.innerText="⏳ Подписываем...";
     const res = await fetch("https://api.daisign.lol/sign", {method:"POST", body:form});
+    logStatus("✅ Ответ от API получен");
     const data = await res.json();
-    console.log(data);
+    logStatus("📦 Данные API: " + JSON.stringify(data));
 
     if (data.installUrl) {
-      // Получаем bundle-id и версию из IPA
       const {bundleId, version} = await extractInfoFromIPA(ipaFile);
       const title = "Seal Installer";
-
-      // Автоген manifest.plist
       const manifestBlob = generateManifest(data.installUrl, bundleId, version, title);
       const manifestUrl = URL.createObjectURL(manifestBlob);
 
-      status.innerHTML = `<a href="itms-services://?action=download-manifest&url=${manifestUrl}">👉 Установить на iOS</a>`;
+      logStatus("🔗 Ссылка на установку готова");
+      document.getElementById("status").innerHTML += `<a href="itms-services://?action=download-manifest&url=${manifestUrl}">👉 Установить на iOS</a>`;
     } else if (data.url) {
-      status.innerHTML = `<a href="${data.url}">👉 Скачать IPA</a>`;
+      logStatus("🔗 Прямая ссылка на IPA: " + data.url);
+      document.getElementById("status").innerHTML += `<a href="${data.url}">👉 Скачать IPA</a>`;
     } else {
-      status.innerText = "❌ " + JSON.stringify(data);
+      logStatus("❌ Неизвестный ответ API: " + JSON.stringify(data));
     }
 
   } catch(e) {
-    status.innerText="❌ Ошибка сети или файлов";
+    logStatus("❌ Ошибка: " + e.message);
     console.error(e);
   }
 }
