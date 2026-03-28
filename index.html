@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Seal Installer</title>
+
+<style>
+body {
+  background: #121212;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  text-align: center;
+  padding: 50px 20px;
+  margin: 0;
+}
+.container {
+  background: #1e1e1e;
+  padding: 40px;
+  border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+  display: inline-block;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+#logo {
+  width: 120px;
+  height: 120px;
+  border-radius: 30px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  animation: blink 5s linear 1;
+}
+h1 {
+  font-size: 42px;
+  margin-bottom: 30px;
+  color: #4CAF50;
+  text-shadow: 0 0 10px #4CAF50;
+}
+input {
+  padding: 12px;
+  margin: 10px 0;
+  border-radius: 12px;
+  border: none;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 16px;
+}
+button {
+  background: #4CAF50;
+  color: white;
+  padding: 14px 28px;
+  font-size: 18px;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+}
+button:hover { background: #45a049; }
+#status a {
+  color: #4CAF50;
+  font-size: 18px;
+  text-decoration: none;
+  font-weight: bold;
+}
+#status a:hover { text-decoration: underline; }
+</style>
+</head>
+
+<body>
+<div class="container">
+  <img id="logo" src="favicon.ico" alt="Seal Installer Logo" />
+  <h1>🦭 Seal Installer</h1>
+
+  <input type="file" id="ipa" accept=".ipa"><br>
+  <button onclick="upload()">Подписать и установить</button>
+
+  <p id="status"></p>
+</div>
+
+<script>
+// Функция для загрузки локальных файлов сертификата, provision и пароля
+async function loadCertFiles() {
+  const p12Resp = await fetch('/assets/cert.p12');
+  const p12Blob = await p12Resp.blob();
+
+  const mpResp = await fetch('/assets/cert.mobileprovision');
+  const mpBlob = await mpResp.blob();
+
+  const passResp = await fetch('/assets/password.txt');
+  const passText = await passResp.text();
+
+  return {p12Blob, mpBlob, password: passText.trim()};
+}
+
+async function upload() {
+  const ipa = document.getElementById("ipa").files[0];
+  const status = document.getElementById("status");
+
+  if (!ipa) {
+    status.innerText = "❌ Выбери IPA";
+    return;
+  }
+
+  status.innerText = "⏳ Загружаем сертификат...";
+
+  try {
+    const {p12Blob, mpBlob, password} = await loadCertFiles();
+
+    const form = new FormData();
+    form.append("ipa", ipa);
+    form.append("p12", p12Blob, "cert.p12");
+    form.append("mobileprovision", mpBlob, "cert.mobileprovision");
+    form.append("password", password);
+
+    status.innerText = "⏳ Подписываем...";
+
+    const res = await fetch("https://api.daisign.lol/sign", {
+      method: "POST",
+      body: form
+    });
+
+    const data = await res.json();
+    console.log(data);
+
+    if (data.installUrl) {
+      status.innerHTML = `<a href="${data.installUrl}">👉 Установить</a>`;
+    } else if (data.url) {
+      status.innerHTML = `<a href="${data.url}">👉 Скачать</a>`;
+    } else {
+      status.innerText = "❌ " + JSON.stringify(data);
+    }
+
+  } catch(e) {
+    status.innerText = "❌ Ошибка сети или загрузки файлов";
+    console.error(e);
+  }
+}
+</script>
+
+</body>
+</html>
