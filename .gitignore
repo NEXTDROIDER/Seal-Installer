@@ -1,0 +1,5 @@
+data/
+certs/*
+!certs/.gitkeep
+.env
+node_modules/

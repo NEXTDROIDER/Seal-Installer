@@ -1,0 +1,10 @@
+{
+  "name": "seal-installer",
+  "version": "2.0.0",
+  "description": "Сервер подписи и установки IPA на Node.js (без зависимостей)",
+  "main": "server.js",
+  "bin": { "seal-installer": "server.js" },
+  "scripts": { "start": "node server.js", "test": "node test/run.js && node test/sign.test.js && node test/server-js.test.js && node test/certsync.test.js" },
+  "engines": { "node": ">=18.13" },
+  "license": "MIT"
+}

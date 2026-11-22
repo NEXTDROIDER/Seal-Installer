@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seal Installer</title>
+<link rel="icon" href="favicon.ico">
+<style>
+:root { --bg:#121212; --card:#1e1e1e; --field:#262626; --text:#fff; --muted:#9a9a9a; --accent:#4CAF50; --err:#ef5350; }
+* { box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; margin:0; padding:32px 16px; display:flex; justify-content:center; }
+.card { background:var(--card); padding:32px 24px; border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,.7); width:100%; max-width:560px; text-align:center; }
+#logo { width:96px; height:96px; border-radius:24px; box-shadow:0 4px 20px rgba(0,0,0,.6); }
+h1 { font-size:32px; margin:16px 0 24px; color:var(--accent); text-shadow:0 0 10px var(--accent); }
+#drop { border:2px dashed #3a3a3a; border-radius:16px; padding:28px 12px; cursor:pointer; color:var(--muted); transition:.15s; }
+#drop.over, #drop:hover { border-color:var(--accent); color:var(--text); }
+#drop b { color:var(--text); word-break:break-all; }
+input[type=text], input[type=password] { width:100%; padding:12px; margin-top:12px; border-radius:12px; border:1px solid #333; background:var(--field); color:var(--text); font-size:16px; }
+button { width:100%; margin-top:16px; background:var(--accent); color:#fff; padding:14px; font-size:18px; border:none; border-radius:14px; cursor:pointer; }
+button:hover:not(:disabled) { filter:brightness(1.1); }
+button:disabled { opacity:.45; cursor:not-allowed; }
+progress { width:100%; height:10px; margin-top:16px; accent-color:var(--accent); display:none; }
+#log { margin:16px 0 0; text-align:left; white-space:pre-wrap; word-break:break-word; font-size:14px; color:#cfcfcf; }
+#log .err { color:var(--err); }
+.link { display:block; margin-top:16px; padding:14px; border-radius:14px; background:#233a24; color:var(--accent); font-weight:bold; font-size:18px; text-decoration:none; }
+.link.alt { background:var(--field); color:var(--text); font-size:15px; font-weight:normal; }
+#warn { color:#ffb74d; font-size:14px; margin-top:12px; display:none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <img id="logo" src="favicon.ico" alt="Seal Installer">
+  <h1>🦭 Seal Installer</h1>
+
+  <label id="drop" for="ipa">Перетащите .ipa сюда или <b>нажмите для выбора</b></label>
+  <input type="file" id="ipa" accept=".ipa" hidden>
+  <input type="password" id="token" placeholder="Токен доступа" autocomplete="off" hidden>
+
+  <button id="go" disabled>Подписать и установить</button>
+  <progress id="bar" max="100" value="0"></progress>
+  <div id="warn"></div>
+  <div id="log" aria-live="polite"></div>
+  <div id="result"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { file: null, cfg: null };
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  $('log').appendChild(line);
+}
+
+function setFile(f) {
+  if (!f) return;
+  if (!/\.ipa$/i.test(f.name)) { log('❌ Нужен файл .ipa', 'err'); return; }
+  state.file = f;
+  $('drop').innerHTML = '📦 <b></b> (' + (f.size / 1048576).toFixed(1) + ' МБ)';
+  $('drop').querySelector('b').textContent = f.name;
+  refresh();
+}
+
+function refresh() {
+  const c = state.cfg;
+  $('go').disabled = !(state.file && c && c.ready);
+}
+
+async function init() {
+  try {
+    const c = await (await fetch('/api/config')).json();
+    state.cfg = c;
+    if (c.tokenRequired) {
+      $('token').hidden = false;
+      try { $('token').value = localStorage.getItem('seal-token') || ''; } catch {}
+    }
+    if (!c.ready) log('❌ Сервер не готов: ' + c.reason, 'err');
+    if (!c.https) {
+      $('warn').style.display = 'block';
+      $('warn').textContent = '⚠ Страница открыта не по HTTPS — iOS не установит приложение. Задайте PUBLIC_URL с https-адресом.';
+    }
+  } catch (e) {
+    log('❌ Нет связи с сервером: ' + e.message, 'err');
+  }
+  refresh();
+}
+
+$('ipa').addEventListener('change', (e) => setFile(e.target.files[0]));
+const drop = $('drop');
+['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => setFile(e.dataTransfer.files[0]));
+
+function upload(file, token) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sign');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    if (token) xhr.setRequestHeader('X-Token', token);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) $('bar').value = (e.loaded / e.total) * 100; };
+    xhr.upload.onload = () => { $('bar').removeAttribute('value'); log('⚙️ Подписываем…'); };
+    xhr.onerror = () => reject(new Error('Сетевая ошибка'));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch {}
+      xhr.status === 200 ? resolve(data) : reject(new Error(data.error || 'HTTP ' + xhr.status));
+    };
+    xhr.send(file);
+  });
+}
+
+$('go').addEventListener('click', async () => {
+  $('log').textContent = '';
+  $('result').textContent = '';
+  $('go').disabled = true;
+  $('bar').style.display = 'block';
+  $('bar').value = 0;
+  const token = $('token').value.trim();
+  try { if (token) localStorage.setItem('seal-token', token); } catch {}
+  try {
+    log('🚀 Загружаем IPA…');
+    const d = await upload(state.file, token);
+    log(`✅ Готово: ${d.name} ${d.version} (${d.bundleId})`);
+    (d.warnings || []).forEach((w) => log('⚠ ' + w));
+    const box = $('result');
+    if (d.installUrl) {
+      const a = document.createElement('a');
+      a.className = 'link';
+      a.href = d.installUrl;
+      a.textContent = '👉 Установить на iOS';
+      box.appendChild(a);
+    }
+    const b = document.createElement('a');
+    b.className = 'link alt';
+    b.href = d.downloadUrl;
+    b.textContent = '⬇ Скачать подписанный IPA';
+    box.appendChild(b);
+  } catch (e) {
+    log('❌ ' + e.message, 'err');
+  } finally {
+    $('bar').style.display = 'none';
+    refresh();
+  }
+});
+
+init();
+</script>
+</body>
+</html>
